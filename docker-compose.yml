@@ -1,0 +1,26 @@
+version: '3.8'
+
+services:
+  asic-monitor:
+    build: .
+    container_name: antminer-checkd
+    restart: always
+    environment:
+      - TZ=UTC
+    volumes:
+      - ./logs:/var/log
+      - /etc/localtime:/etc/localtime:ro
+    command:
+      - --ip=${ASIC_IP}
+      - --port=${ASIC_PORT}
+      - --user=${ASIC_USER}
+      - --password=${ASIC_PASSWORD}
+      - --telegram-token=${TELEGRAM_TOKEN}
+      - --telegram-chat=${TELEGRAM_CHAT_ID}
+      - --min-hashrate=${MIN_HASHRATE}
+      - --interval=${CHECK_INTERVAL}
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
