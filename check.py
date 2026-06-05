@@ -227,11 +227,23 @@ class ASICMonitor:
                                 self.consecutive_errors = 0
                                 time.sleep(120)
                                 continue
+                    else:
+                        logger.warning("⚠️ Не удалось получить хэшрейт")
+                        self.consecutive_errors += 1
+                        if self.consecutive_errors >= self.reboot_threshold:
+                            logger.warning("⚠️ Максимальное количество ошибок получения хэшрейта, перезагрузка...")
+                            if self.restart_asic():
+                                self.consecutive_errors = 0
+                                time.sleep(120)
+                        continue
                 
-                # Всё хорошо
+                # Всё хорошо - выводим хэшрейт в лог
+                if hashrate is not None:
+                    logger.info(f"✅ ASIC работает нормально. Хэшрейт: {hashrate:.2f} TH/s")
+                else:
+                    logger.info(f"✅ ASIC работает нормально")
+                
                 self.consecutive_errors = 0
-                logger.info(f"✅ ASIC работает нормально")
-                
                 time.sleep(self.check_interval)
                 
             except Exception as e:

@@ -19,8 +19,20 @@ if [ "$EUID" -ne 0 ]; then
 fi
 
 REPO_URL="https://github.com/Tkom3a/antminer-ckeckd.git"
-INSTALL_DIR="/opt/antminer-checkd"
+
+# Определяем директорию установки - текущая папка где запущен скрипт
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+if [ "$SCRIPT_DIR" = "/" ] || [ -z "$SCRIPT_DIR" ]; then
+    # Если скрипт запущен через pipe, используем текущую рабочую директорию
+    INSTALL_DIR="$(pwd)/antminer-checkd"
+else
+    INSTALL_DIR="$SCRIPT_DIR"
+fi
+
 ENV_FILE="$INSTALL_DIR/.env"
+
+echo -e "${BLUE}📁 Директория установки: $INSTALL_DIR${NC}"
+echo ""
 
 # Функция проверки валидности .env
 is_env_valid() {
@@ -37,7 +49,7 @@ is_env_valid() {
     return 0
 }
 
-# Функция запроса данных - ИСПРАВЛЕНА
+# Функция запроса данных
 ask_config() {
     echo -e "${CYAN}📝 Настройка мониторинга ASIC${NC}"
     echo -e "${YELLOW}Пожалуйста, введите следующие данные:${NC}"
@@ -200,9 +212,9 @@ EOF
 # ОСНОВНАЯ ЛОГИКА
 # ============================================
 
-# Проверяем существующую установку
-if [ -d "$INSTALL_DIR" ]; then
-    echo -e "${YELLOW}⚠️  Установка найдена в $INSTALL_DIR${NC}"
+# Проверяем существующую установку в текущей директории
+if [ -d "$INSTALL_DIR" ] && [ -f "$INSTALL_DIR/docker-compose.yml" ]; then
+    echo -e "${YELLOW}⚠️  Установка уже найдена в $INSTALL_DIR${NC}"
     
     if is_env_valid; then
         source "$ENV_FILE"
@@ -228,7 +240,6 @@ if [ -d "$INSTALL_DIR" ]; then
     case $choice in
         1)
             cd "$INSTALL_DIR" 2>/dev/null && docker-compose down 2>/dev/null || true
-            cd /
             rm -rf "$INSTALL_DIR"
             docker rm -f antminer-checkd 2>/dev/null || true
             docker rmi antminer-checkd_antminer-checkd 2>/dev/null || true
@@ -254,8 +265,8 @@ test_telegram || exit 1
 # Устанавливаем Docker
 install_docker
 
-# Клонируем репозиторий
-echo -e "${BLUE}📦 Клонирование репозитория...${NC}"
+# Клонируем репозиторий в текущую директорию
+echo -e "${BLUE}📦 Клонирование репозитория в $INSTALL_DIR...${NC}"
 git clone "$REPO_URL" "$INSTALL_DIR"
 cd "$INSTALL_DIR"
 
@@ -286,6 +297,7 @@ if docker-compose ps | grep -q "Up"; then
     echo -e "  docker-compose stop        # Остановка"
     echo ""
     echo -e "${GREEN}🔄 Контейнер будет автоматически запускаться после перезагрузки сервера!${NC}"
+    echo -e "${GREEN}📁 Для удаления: rm -rf $INSTALL_DIR${NC}"
 else
     echo -e "${RED}❌ Ошибка запуска контейнера${NC}"
     docker-compose logs --tail=30
