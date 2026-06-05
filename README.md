@@ -4,7 +4,7 @@
 
 # Конфигурацию:  
 
-nano /opt/asic-monitor/.env  
+nano /opt/antminer-checkd/.env  
 
 # Полное удаление:  
 
