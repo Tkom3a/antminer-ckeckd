@@ -8,16 +8,6 @@ BLUE='\033[0;34m'
 CYAN='\033[0;36m'
 NC='\033[0m'
 
-# Проверяем, что скрипт запущен не через pipe
-if [ ! -t 0 ]; then
-    echo -e "${YELLOW}⚠️  Скрипт запущен через pipe. Перезапускаем для интерактивного режима...${NC}"
-    # Скачиваем и запускаем заново в интерактивном режиме
-    curl -sSL https://raw.githubusercontent.com/Tkom3a/antminer-ckeckd/main/install.sh -o /tmp/antminer_install.sh
-    chmod +x /tmp/antminer_install.sh
-    exec /tmp/antminer_install.sh
-    exit 0
-fi
-
 echo -e "${GREEN}========================================${NC}"
 echo -e "${GREEN}antminer-checkd Installation Script${NC}"
 echo -e "${GREEN}========================================${NC}"
@@ -47,28 +37,36 @@ is_env_valid() {
     return 0
 }
 
-# Функция запроса данных
+# Функция запроса данных - ИСПРАВЛЕНА
 ask_config() {
     echo -e "${CYAN}📝 Настройка мониторинга ASIC${NC}"
     echo -e "${YELLOW}Пожалуйста, введите следующие данные:${NC}"
     echo ""
     
+    # IP адрес
     while true; do
-        read -p "$(echo -e ${BLUE}IP адрес ASIC: ${NC})" ASIC_IP
+        printf "${BLUE}IP адрес ASIC: ${NC}"
+        read ASIC_IP
         if [ -n "$ASIC_IP" ]; then
             break
         fi
         echo -e "${RED}IP адрес не может быть пустым${NC}"
     done
     
-    read -p "$(echo -e ${BLUE}Порт ASIC [80]: ${NC})" ASIC_PORT
+    # Порт
+    printf "${BLUE}Порт ASIC [80]: ${NC}"
+    read ASIC_PORT
     ASIC_PORT=${ASIC_PORT:-80}
     
-    read -p "$(echo -e ${BLUE}Имя пользователя [root]: ${NC})" ASIC_USER
+    # Имя пользователя
+    printf "${BLUE}Имя пользователя [root]: ${NC}"
+    read ASIC_USER
     ASIC_USER=${ASIC_USER:-root}
     
+    # Пароль
     while true; do
-        read -s -p "$(echo -e ${BLUE}Пароль ASIC: ${NC})" ASIC_PASSWORD
+        printf "${BLUE}Пароль ASIC: ${NC}"
+        read -s ASIC_PASSWORD
         echo ""
         if [ -n "$ASIC_PASSWORD" ]; then
             break
@@ -78,31 +76,108 @@ ask_config() {
     
     echo ""
     
+    # Telegram Token
     while true; do
-        read -p "$(echo -e ${BLUE}Telegram Bot Token: ${NC})" TELEGRAM_TOKEN
+        printf "${BLUE}Telegram Bot Token: ${NC}"
+        read TELEGRAM_TOKEN
         if [ -n "$TELEGRAM_TOKEN" ]; then
             break
         fi
         echo -e "${RED}Token не может быть пустым${NC}"
     done
     
+    # Telegram Chat ID
     while true; do
-        read -p "$(echo -e ${BLUE}Telegram Chat ID: ${NC})" TELEGRAM_CHAT_ID
+        printf "${BLUE}Telegram Chat ID: ${NC}"
+        read TELEGRAM_CHAT_ID
         if [ -n "$TELEGRAM_CHAT_ID" ]; then
             break
         fi
         echo -e "${RED}Chat ID не может быть пустым${NC}"
     done
     
-    read -p "$(echo -e ${BLUE}Мин. хэшрейт TH/s [80]: ${NC})" MIN_HASHRATE
+    # Минимальный хэшрейт
+    printf "${BLUE}Мин. хэшрейт TH/s [80]: ${NC}"
+    read MIN_HASHRATE
     MIN_HASHRATE=${MIN_HASHRATE:-80}
     
-    read -p "$(echo -e ${BLUE}Интервал проверки сек [300]: ${NC})" CHECK_INTERVAL
+    # Интервал проверки
+    printf "${BLUE}Интервал проверки сек [300]: ${NC}"
+    read CHECK_INTERVAL
     CHECK_INTERVAL=${CHECK_INTERVAL:-300}
     
     echo ""
     echo -e "${GREEN}✅ Данные сохранены${NC}"
     echo ""
+}
+
+# Функция проверки подключения к ASIC
+test_connection() {
+    echo -e "${CYAN}🔍 Проверка подключения к ASIC...${NC}"
+    
+    if curl -s --digest -u "${ASIC_USER}:${ASIC_PASSWORD}" \
+        --connect-timeout 5 \
+        "http://${ASIC_IP}:${ASIC_PORT}/cgi-bin/stats.cgi" > /dev/null 2>&1; then
+        echo -e "${GREEN}✓ Подключение к ASIC успешно${NC}"
+        return 0
+    else
+        echo -e "${YELLOW}⚠️  Не удалось подключиться к ASIC${NC}"
+        read -p "Продолжить установку? (y/n): " continue_anyway
+        [[ "$continue_anyway" =~ ^[Yy]$ ]]
+        return $?
+    fi
+}
+
+# Функция проверки Telegram
+test_telegram() {
+    echo -e "${CYAN}📱 Проверка Telegram бота...${NC}"
+    
+    local test_message="🟢 <b>antminer-checkd</b> установка начата!"
+    
+    if curl -s -X POST "https://api.telegram.org/bot${TELEGRAM_TOKEN}/sendMessage" \
+        -d "chat_id=${TELEGRAM_CHAT_ID}" \
+        -d "text=${test_message}" \
+        -d "parse_mode=HTML" \
+        --connect-timeout 10 > /dev/null 2>&1; then
+        echo -e "${GREEN}✓ Telegram бот работает${NC}"
+        return 0
+    else
+        echo -e "${YELLOW}⚠️  Не удалось отправить сообщение в Telegram${NC}"
+        read -p "Продолжить установку? (y/n): " continue_anyway
+        [[ "$continue_anyway" =~ ^[Yy]$ ]]
+        return $?
+    fi
+}
+
+# Функция установки Docker
+install_docker() {
+    if ! command -v docker &> /dev/null; then
+        echo -e "${YELLOW}🐳 Установка Docker...${NC}"
+        curl -fsSL https://get.docker.com -o get-docker.sh
+        sh get-docker.sh
+        rm get-docker.sh
+        echo -e "${GREEN}✓ Docker установлен${NC}"
+    else
+        echo -e "${GREEN}✓ Docker уже установлен${NC}"
+    fi
+
+    if command -v docker-compose &> /dev/null; then
+        OLD_VERSION=$(docker-compose --version 2>/dev/null | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1)
+        if [[ "$OLD_VERSION" == 1.* ]]; then
+            echo -e "${YELLOW}⚠️  Обновляем Docker Compose...${NC}"
+            sudo rm -f /usr/local/bin/docker-compose
+            sudo apt-get remove docker-compose -y 2>/dev/null || true
+        fi
+    fi
+
+    if ! command -v docker-compose &> /dev/null; then
+        echo -e "${YELLOW}🐳 Установка Docker Compose v2...${NC}"
+        sudo curl -L "https://github.com/docker/compose/releases/download/v2.24.0/docker-compose-$(uname -s)-$(uname -m)" -o /usr/local/bin/docker-compose
+        sudo chmod +x /usr/local/bin/docker-compose
+        echo -e "${GREEN}✓ Docker Compose v2 установлен${NC}"
+    else
+        echo -e "${GREEN}✓ Docker Compose уже установлен${NC}"
+    fi
 }
 
 # Функция создания .env
@@ -118,25 +193,7 @@ TELEGRAM_CHAT_ID=${TELEGRAM_CHAT_ID}
 MIN_HASHRATE=${MIN_HASHRATE}
 CHECK_INTERVAL=${CHECK_INTERVAL}
 EOF
-    echo -e "${GREEN}✓ Файл .env создан${NC}"
-}
-
-# Функция установки Docker
-install_docker() {
-    if ! command -v docker &> /dev/null; then
-        echo -e "${YELLOW}🐳 Установка Docker...${NC}"
-        curl -fsSL https://get.docker.com -o get-docker.sh
-        sh get-docker.sh
-        rm get-docker.sh
-    fi
-
-    if ! command -v docker-compose &> /dev/null; then
-        echo -e "${YELLOW}🐳 Установка Docker Compose...${NC}"
-        curl -L "https://github.com/docker/compose/releases/download/v2.24.0/docker-compose-$(uname -s)-$(uname -m)" -o /usr/local/bin/docker-compose
-        chmod +x /usr/local/bin/docker-compose
-    fi
-
-    echo -e "${GREEN}✓ Docker готов${NC}"
+    echo -e "${GREEN}✓ Файл .env создан в $ENV_FILE${NC}"
 }
 
 # ============================================
@@ -146,7 +203,6 @@ install_docker() {
 # Проверяем существующую установку
 if [ -d "$INSTALL_DIR" ]; then
     echo -e "${YELLOW}⚠️  Установка найдена в $INSTALL_DIR${NC}"
-    echo ""
     
     if is_env_valid; then
         source "$ENV_FILE"
@@ -163,6 +219,7 @@ if [ -d "$INSTALL_DIR" ]; then
         fi
     fi
     
+    echo ""
     echo -e "${BLUE}Выберите действие:${NC}"
     echo "  1) Удалить и установить заново (с новыми настройками)"
     echo "  2) Выход"
@@ -180,11 +237,19 @@ if [ -d "$INSTALL_DIR" ]; then
         2)
             exit 0
             ;;
+        *)
+            echo -e "${RED}Неверный выбор${NC}"
+            exit 1
+            ;;
     esac
 fi
 
 # Запрашиваем конфигурацию
 ask_config
+
+# Проверяем подключения
+test_connection || exit 1
+test_telegram || exit 1
 
 # Устанавливаем Docker
 install_docker
@@ -198,6 +263,7 @@ cd "$INSTALL_DIR"
 create_env_file
 
 # Запускаем контейнер
+echo -e "${BLUE}🚀 Запуск контейнера...${NC}"
 mkdir -p logs
 docker-compose up -d --build
 
@@ -212,6 +278,12 @@ if docker-compose ps | grep -q "Up"; then
     echo -e "  📁 Установлен в: $INSTALL_DIR"
     echo -e "  🐳 Контейнер: antminer-checkd"
     echo -e "  📝 Логи: cd $INSTALL_DIR && docker-compose logs -f"
+    echo ""
+    echo -e "${BLUE}🔧 Управление:${NC}"
+    echo -e "  cd $INSTALL_DIR"
+    echo -e "  docker-compose logs -f     # Просмотр логов"
+    echo -e "  docker-compose restart     # Перезапуск"
+    echo -e "  docker-compose stop        # Остановка"
     echo ""
     echo -e "${GREEN}🔄 Контейнер будет автоматически запускаться после перезагрузки сервера!${NC}"
 else
