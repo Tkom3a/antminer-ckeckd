@@ -13,6 +13,15 @@ echo -e "${GREEN}antminer-checkd Installation Script${NC}"
 echo -e "${GREEN}========================================${NC}"
 echo ""
 
+# Проверяем, что скрипт запущен не через pipe (для интерактивного ввода)
+if [ ! -t 0 ]; then
+    echo -e "${YELLOW}⚠️  Скрипт запущен через pipe. Скачиваем и запускаем в интерактивном режиме...${NC}"
+    curl -sSL https://raw.githubusercontent.com/Tkom3a/antminer-ckeckd/main/install.sh -o /tmp/antminer_install.sh
+    chmod +x /tmp/antminer_install.sh
+    exec /tmp/antminer_install.sh
+    exit 0
+fi
+
 if [ "$EUID" -ne 0 ]; then 
     echo -e "${YELLOW}⚠️  Запуск с sudo...${NC}"
     exec sudo "$0" "$@"
@@ -22,8 +31,8 @@ REPO_URL="https://github.com/Tkom3a/antminer-ckeckd.git"
 
 # Определяем директорию установки - текущая папка где запущен скрипт
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-if [ "$SCRIPT_DIR" = "/" ] || [ -z "$SCRIPT_DIR" ]; then
-    # Если скрипт запущен через pipe, используем текущую рабочую директорию
+if [ "$SCRIPT_DIR" = "/" ] || [ -z "$SCRIPT_DIR" ] || [ "$SCRIPT_DIR" = "/tmp" ]; then
+    # Если скрипт запущен из /tmp или через pipe, используем текущую рабочую директорию
     INSTALL_DIR="$(pwd)/antminer-checkd"
 else
     INSTALL_DIR="$SCRIPT_DIR"
@@ -95,7 +104,7 @@ ask_config() {
         if [ -n "$TELEGRAM_TOKEN" ]; then
             break
         fi
-        echo -e "${RED}Token не может быть пустым${NC}"
+        echo -e "${RED}Telegram Token не может быть пустым${NC}"
     done
     
     # Telegram Chat ID
@@ -105,16 +114,16 @@ ask_config() {
         if [ -n "$TELEGRAM_CHAT_ID" ]; then
             break
         fi
-        echo -e "${RED}Chat ID не может быть пустым${NC}"
+        echo -e "${RED}Telegram Chat ID не может быть пустым${NC}"
     done
     
     # Минимальный хэшрейт
-    printf "${BLUE}Мин. хэшрейт TH/s [80]: ${NC}"
+    printf "${BLUE}Минимальный хэшрейт TH/s [80]: ${NC}"
     read MIN_HASHRATE
     MIN_HASHRATE=${MIN_HASHRATE:-80}
     
     # Интервал проверки
-    printf "${BLUE}Интервал проверки сек [300]: ${NC}"
+    printf "${BLUE}Интервал проверки секунд [300]: ${NC}"
     read CHECK_INTERVAL
     CHECK_INTERVAL=${CHECK_INTERVAL:-300}
     
@@ -134,9 +143,12 @@ test_connection() {
         return 0
     else
         echo -e "${YELLOW}⚠️  Не удалось подключиться к ASIC${NC}"
+        echo -e "${YELLOW}   Проверьте IP: ${ASIC_IP}, порт: ${ASIC_PORT}, пароль${NC}"
         read -p "Продолжить установку? (y/n): " continue_anyway
-        [[ "$continue_anyway" =~ ^[Yy]$ ]]
-        return $?
+        if [[ ! "$continue_anyway" =~ ^[Yy]$ ]]; then
+            exit 1
+        fi
+        return 1
     fi
 }
 
@@ -155,16 +167,19 @@ test_telegram() {
         return 0
     else
         echo -e "${YELLOW}⚠️  Не удалось отправить сообщение в Telegram${NC}"
+        echo -e "${YELLOW}   Проверьте Token и Chat ID${NC}"
         read -p "Продолжить установку? (y/n): " continue_anyway
-        [[ "$continue_anyway" =~ ^[Yy]$ ]]
-        return $?
+        if [[ ! "$continue_anyway" =~ ^[Yy]$ ]]; then
+            exit 1
+        fi
+        return 1
     fi
 }
 
 # Функция установки Docker
 install_docker() {
     if ! command -v docker &> /dev/null; then
-        echo -e "${YELLOW}🐳 Установка Docker...${NC}"
+        echo -e "${YELLOW}🐳 Docker не установлен. Устанавливаем...${NC}"
         curl -fsSL https://get.docker.com -o get-docker.sh
         sh get-docker.sh
         rm get-docker.sh
@@ -173,17 +188,18 @@ install_docker() {
         echo -e "${GREEN}✓ Docker уже установлен${NC}"
     fi
 
+    # Проверяем версию Docker Compose
     if command -v docker-compose &> /dev/null; then
         OLD_VERSION=$(docker-compose --version 2>/dev/null | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1)
         if [[ "$OLD_VERSION" == 1.* ]]; then
-            echo -e "${YELLOW}⚠️  Обновляем Docker Compose...${NC}"
+            echo -e "${YELLOW}⚠️  Обновляем Docker Compose v${OLD_VERSION} -> v2...${NC}"
             sudo rm -f /usr/local/bin/docker-compose
             sudo apt-get remove docker-compose -y 2>/dev/null || true
         fi
     fi
 
     if ! command -v docker-compose &> /dev/null; then
-        echo -e "${YELLOW}🐳 Установка Docker Compose v2...${NC}"
+        echo -e "${YELLOW}🐳 Устанавливаем Docker Compose v2...${NC}"
         sudo curl -L "https://github.com/docker/compose/releases/download/v2.24.0/docker-compose-$(uname -s)-$(uname -m)" -o /usr/local/bin/docker-compose
         sudo chmod +x /usr/local/bin/docker-compose
         echo -e "${GREEN}✓ Docker Compose v2 установлен${NC}"
@@ -208,11 +224,25 @@ EOF
     echo -e "${GREEN}✓ Файл .env создан в $ENV_FILE${NC}"
 }
 
+# Функция отправки финального сообщения
+send_final_notification() {
+    local message="🟢 <b>antminer-checkd</b> установлен и запущен!\\n"
+    message+="📊 Мониторинг ASIC ${ASIC_IP}:${ASIC_PORT}\\n"
+    message+="🎯 Минимальный хэшрейт: ${MIN_HASHRATE} TH/s\\n"
+    message+="⏱️  Интервал проверки: ${CHECK_INTERVAL} сек"
+    
+    curl -s -X POST "https://api.telegram.org/bot${TELEGRAM_TOKEN}/sendMessage" \
+        -d "chat_id=${TELEGRAM_CHAT_ID}" \
+        -d "text=${message}" \
+        -d "parse_mode=HTML" \
+        --connect-timeout 10 > /dev/null 2>&1 || true
+}
+
 # ============================================
 # ОСНОВНАЯ ЛОГИКА
 # ============================================
 
-# Проверяем существующую установку в текущей директории
+# Проверяем существующую установку
 if [ -d "$INSTALL_DIR" ] && [ -f "$INSTALL_DIR/docker-compose.yml" ]; then
     echo -e "${YELLOW}⚠️  Установка уже найдена в $INSTALL_DIR${NC}"
     
@@ -244,6 +274,7 @@ if [ -d "$INSTALL_DIR" ] && [ -f "$INSTALL_DIR/docker-compose.yml" ]; then
             docker rm -f antminer-checkd 2>/dev/null || true
             docker rmi antminer-checkd_antminer-checkd 2>/dev/null || true
             echo -e "${GREEN}✓ Старая установка удалена${NC}"
+            echo ""
             ;;
         2)
             exit 0
@@ -259,14 +290,15 @@ fi
 ask_config
 
 # Проверяем подключения
-test_connection || exit 1
-test_telegram || exit 1
+test_connection
+test_telegram
 
 # Устанавливаем Docker
 install_docker
 
-# Клонируем репозиторий в текущую директорию
+# Клонируем репозиторий
 echo -e "${BLUE}📦 Клонирование репозитория в $INSTALL_DIR...${NC}"
+rm -rf "$INSTALL_DIR" 2>/dev/null || true
 git clone "$REPO_URL" "$INSTALL_DIR"
 cd "$INSTALL_DIR"
 
@@ -280,6 +312,8 @@ docker-compose up -d --build
 
 sleep 5
 if docker-compose ps | grep -q "Up"; then
+    send_final_notification
+    
     echo ""
     echo -e "${GREEN}========================================${NC}"
     echo -e "${GREEN}✅ antminer-checkd успешно установлен!${NC}"
@@ -296,6 +330,10 @@ if docker-compose ps | grep -q "Up"; then
     echo -e "  docker-compose restart     # Перезапуск"
     echo -e "  docker-compose stop        # Остановка"
     echo ""
+    echo -e "${BLUE}📝 Изменить настройки:${NC}"
+    echo -e "  nano $ENV_FILE && cd $INSTALL_DIR && docker-compose restart"
+    echo ""
+    echo -e "${GREEN}📱 Telegram бот оповещает о работе монитора!${NC}"
     echo -e "${GREEN}🔄 Контейнер будет автоматически запускаться после перезагрузки сервера!${NC}"
     echo -e "${GREEN}📁 Для удаления: rm -rf $INSTALL_DIR${NC}"
 else
