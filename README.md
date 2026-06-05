@@ -4,7 +4,7 @@
 
 # Установка одной строкой:  
 
-sudo curl -sSL https://raw.githubusercontent.com/Tkom3a/antminer-ckeckd/main/install.sh | bash  
+sudo curl -sSL https://raw.githubusercontent.com/Tkom3a/antminer-ckeckd/main/install.sh -o /tmp/install.sh && sudo bash /tmp/install.sh  
 
 # Конфигурацию:  
 
