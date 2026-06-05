@@ -98,27 +98,51 @@ class ASICMonitor:
             return False
     
     def get_hashrate(self):
-        """Получение хэшрейта"""
-        try:
-            # Пробуем получить статистику
-            endpoints = [
-                f"{self.base_url}/cgi-bin/stats.cgi",
-                f"{self.base_url}/cgi-bin/miner_status.cgi"
-            ]
-            
-            for endpoint in endpoints:
-                try:
-                    response = self.session.get(endpoint, timeout=5)
-                    if response.status_code == 200:
+    """Получение хэшрейта"""
+    try:
+        # Пробуем получить статистику
+        endpoints = [
+            f"{self.base_url}/cgi-bin/stats.cgi",
+            f"{self.base_url}/cgi-bin/miner_status.cgi"
+        ]
+        
+        for endpoint in endpoints:
+            try:
+                response = self.session.get(endpoint, timeout=5)
+                if response.status_code == 200:
+                    # Пробуем распарсить JSON
+                    try:
                         data = response.json()
                         if 'STATS' in data:
                             for stat in data['STATS']:
+                                # Обработка rate_5s в GH/s
+                                if 'rate_5s' in stat:
+                                    hashrate = float(stat['rate_5s']) / 1000  # GH/s -> TH/s
+                                    logger.debug(f"Хэшрейт: {hashrate:.2f} TH/s (из rate_5s)")
+                                    return hashrate
                                 if 'GHS 5s' in stat:
                                     hashrate = float(stat['GHS 5s']) / 1000
-                                    logger.debug(f"Хэшрейт: {hashrate:.2f} TH/s")
+                                    logger.debug(f"Хэшрейт: {hashrate:.2f} TH/s (из GHS 5s)")
                                     return hashrate
-                except:
-                    continue
+                    except:
+                        # Если не JSON, пробуем парсить текст
+                        import re
+                        # Ищем rate_5s в тексте
+                        match = re.search(r'"rate_5s":\s*([0-9.]+)', response.text)
+                        if match:
+                            hashrate = float(match.group(1)) / 1000
+                            logger.debug(f"Хэшрейт: {hashrate:.2f} TH/s (из текста)")
+                            return hashrate
+            except Exception as e:
+                logger.debug(f"Ошибка при запросе {endpoint}: {e}")
+                continue
+        
+        logger.warning("Не удалось найти хэшрейт в ответе")
+        return None
+        
+    except Exception as e:
+        logger.error(f"Ошибка получения хэшрейта: {e}")
+        return None
             
             return None
         except Exception as e:
